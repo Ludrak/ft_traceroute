@@ -91,11 +91,9 @@ int send_probe_packet(uint8_t ttl, uint16_t dest_port)
 #define RECV_ICMP_TIMEOUT 0
 #define RECV_ICMP_TTL_EXCEEDED 1
 #define RECV_ICMP_DEST_REACHED 2
-#define RECV_ICMP_INVALID 3
-int receive_icmp_response(uint8_t expected_hop, uint16_t expected_port, struct timeval *send_time)
+#define RECV_ICMP_IGNORED 3
+int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time)
 {
-    debug_log("Waiting for ICMP response: hop=%d, port=%d, timeout=%d.%06ds", expected_hop, expected_port, TIMEOUT_SEC, TIMEOUT_USEC);
-
     fd_set read_fds;
     struct timeval timeout;
     icmp_response_packet_t response;
@@ -107,9 +105,7 @@ int receive_icmp_response(uint8_t expected_hop, uint16_t expected_port, struct t
     FD_ZERO(&read_fds);
     FD_SET(ctx.icmp_socket, &read_fds);
 
-    debug_log("Calling select() with timeout %d.%06ld", timeout.tv_sec, timeout.tv_usec);
     int select_result = select(ctx.icmp_socket + 1, &read_fds, NULL, NULL, &timeout);
-    debug_log("select() returned: %d", select_result);
 
     if (select_result < 0)
     {
@@ -118,43 +114,36 @@ int receive_icmp_response(uint8_t expected_hop, uint16_t expected_port, struct t
     }
     
     if (select_result == 0)
-    {
-        // Timeout
-        debug_log("TIMEOUT: No response received within %d.%06d seconds", TIMEOUT_SEC, TIMEOUT_USEC);
         return (RECV_ICMP_TIMEOUT);
-    }
     
     // Receive ICMP response
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
 
-    debug_log("Receiving ICMP packet...");
     ssize_t bytes_received = recvfrom(ctx.icmp_socket, &response, sizeof(response), 0,
                                      SOCKADDR(&from_addr), &from_len);
 
     if (bytes_received < 0)
     {
         print_failed("recvfrom()", errno);
+        printf("E");
         return (RECV_ICMP_ERROR);
     }
 
     // Get receive time
     struct timeval recv_time;
     gettimeofday(&recv_time, NULL);
-    debug_log("Received %zd bytes from %s", bytes_received, inet_ntoa(from_addr.sin_addr));
 
     // Validate ICMP response
-    debug_log("Validating ICMP response...");
     int packet_status = validate_icmp_response(&response, getpid() & 0xFFFF);
-    if (packet_status == 0)
-    {
-        debug_log("ICMP packet validation failed - not our packet");
-        return (0);
+    if (packet_status == VALIDATE_ICMP_ERROR) {
+          printf("e");
+        return (RECV_ICMP_ERROR); // TODO: fix RECV_ICMP_TIMEOUT
     }
-    else if (packet_status == 2) {
-        return (RECV_ICMP_INVALID);
+    else if (packet_status == VALIDATE_ICMP_IGNORED) {
+        printf("i");
+        return (RECV_ICMP_IGNORED);
     }
-    debug_log("ICMP packet validation successful");
     
     // Calculate RTT
     time_t rtt = get_difference_timeval(*send_time, recv_time);
@@ -165,20 +154,12 @@ int receive_icmp_response(uint8_t expected_hop, uint16_t expected_port, struct t
     // Add hop result
     ctx_add_hop_result(expected_hop, source_ip, rtt, ctx.stats.hops[expected_hop - 1].received_probes);
 
-    // Get ICMP annotation for error codes
-    const char* annotation = get_icmp_annotation(&response);
-    if (strlen(annotation) > 0)
-    {
-        debug_log("ICMP annotation: %s", annotation);
-        // TODO: Store annotation in hop result for display
-    }
-
     // Check if destination reached
     if (is_destination_reached(&response))
     {
         ctx.stats.hops[expected_hop - 1].is_destination = 1;
         free(source_ip);
-        return (2); // Destination reached
+        return (RECV_ICMP_DEST_REACHED); // Destination reached
     }
 
     // Check if TTL exceeded (normal intermediate hop)
@@ -188,8 +169,10 @@ int receive_icmp_response(uint8_t expected_hop, uint16_t expected_port, struct t
         return (RECV_ICMP_TTL_EXCEEDED); // TTL exceeded (normal response)
     }
 
+    printf("ignored after: %d", packet_status);
+
     free(source_ip);
-    return (RECV_ICMP_INVALID); // Other ICMP message
+    return (RECV_ICMP_IGNORED); // Other ICMP message
 }
 
 // State machine approach: send one packet, receive one response
@@ -218,36 +201,70 @@ int traceroute_single_probe(uint8_t hop_number, uint8_t probe_number, uint16_t p
 
     // Wait for response
     debug_log("Waiting for response to probe %d...", probe_number + 1);
-    int response_result = 3;
-    while (response_result == 3) // debounce ignored packets
-      response_result = receive_icmp_response(hop_number, probe_port, &send_time);
+    int response_result = RECV_ICMP_IGNORED;
+    while (response_result == RECV_ICMP_IGNORED) // debounce ignored packets
+      response_result = receive_icmp_response(hop_number, &send_time);
     debug_log("Response result: %d", response_result);
 
-    if (response_result == 0)
+    if (response_result == RECV_ICMP_TIMEOUT)
     {
         // Timeout
         debug_log("Probe %d timed out", probe_number + 1);
         ctx_add_hop_result(hop_number, NULL, -1, probe_number);
         return PROBE_TIMEOUT;
     }
-    else if (response_result == 1 || response_result == 2)
+    else if (response_result == RECV_ICMP_TTL_EXCEEDED)
+        return (PROBE_TTL_EXCEEDED);
+    else if (response_result == RECV_ICMP_DEST_REACHED)
+        return (PROBE_DEST_REACHED);
+
+    // Error
+    debug_log("Error receiving response for probe %d", probe_number + 1);
+    ctx_add_hop_result(hop_number, NULL, -1, probe_number);
+    return PROBE_ERROR;
+}
+
+int print_hop_info(hop_result_t *hop, int probe, int print_host)
+{
+    int resolved = 0;
+
+    if (hop->ip_addr)
     {
-        // Valid response - result already stored in ctx_add_hop_result
-        debug_log("Valid response received for probe %d", probe_number + 1);
-        if (response_result == 2)
-        {
-            debug_log("Destination reached!");
-            return PROBE_DEST_REACHED; // Destination reached
+        if (print_host) {
+            if (hop->hostname && strcmp(hop->hostname, hop->ip_addr) != 0)
+            {
+                printf(" %s (%s)", hop->hostname, hop->ip_addr);
+            }
+            else
+            {
+                printf(" %s (%s)", hop->ip_addr, hop->ip_addr);
+            }
+            resolved = 1;
         }
-        return PROBE_TTL_EXCEEDED; // Normal response
+
+        // Print timing measurements
+        if (hop->rtt[probe] >= 0)
+        {
+            printf("  %.3f ms", (float)hop->rtt[probe] / 1000.0f);
+        }
     }
-    else
+    return (resolved);
+}
+
+int resolve_hop_host(hop_result_t *hop)
+{
+    if (hop->ip_addr)
     {
-        // Error
-        debug_log("Error receiving response for probe %d", probe_number + 1);
-        ctx_add_hop_result(hop_number, NULL, -1, probe_number);
-        return PROBE_ERROR;
+        // Resolve hostname for this IP if not already done
+        if (hop->hostname == NULL)
+        {
+            struct sockaddr_in addr;
+            inet_pton(AF_INET, hop->ip_addr, &addr.sin_addr);
+            hop->hostname = resolve_hostname_from_ip(addr.sin_addr.s_addr, 0);
+        }
+        return 1;
     }
+    return 0;
 }
 
 int traceroute_hop(uint8_t hop_number)
@@ -264,55 +281,30 @@ int traceroute_hop(uint8_t hop_number)
     {
         uint16_t probe_port = ctx.current_port + probe;
         int result = traceroute_single_probe(hop_number, probe, probe_port);
-        if (result == 2)
+        if (result == PROBE_DEST_REACHED)
         {
             destination_reached = 1;
             printf("reach");
             // Continue with remaining probes for this hop
         }
-        if (result == 3) {
+        if (result == PROBE_TIMEOUT) {
           printf(" *");
           fflush(stdout);
           continue;
         }
 
-        // Print hop information
         hop_result_t *hop = &ctx.stats.hops[hop_number - 1];
-        if (hop->ip_addr)
+
+
+        uint8_t print_host = 0;
+        if (!resolved)
         {
-            // Resolve hostname for this IP if not already done
-            if (hop->hostname == NULL)
-            {
-                struct sockaddr_in addr;
-                inet_pton(AF_INET, hop->ip_addr, &addr.sin_addr);
-                hop->hostname = resolve_hostname_from_ip(addr.sin_addr.s_addr, 0);
-            }
-
-            if (!resolved) {
-                if (hop->hostname && strcmp(hop->hostname, hop->ip_addr) != 0)
-                {
-                    printf(" %s (%s)", hop->hostname, hop->ip_addr);
-                }
-                else
-                {
-                    printf(" %s (%s)", hop->ip_addr, hop->ip_addr);
-                }
+            print_host = resolve_hop_host(hop);
+            if (print_host)
                 resolved = 1;
-            }
-
-            // Print timing measurements
-            if (hop->rtt[probe] >= 0)
-            {
-                printf("  %.3f ms", (float)hop->rtt[probe] / 1000.0f);
-            }
         }
-//            else
-//            {
-//                printf("  *");
-//            }
-//        } else {
-//            printf("  *");
-//        }
+
+        print_hop_info(hop, probe, print_host);
     }
     
 //    // Print hop information

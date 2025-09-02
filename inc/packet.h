@@ -52,10 +52,16 @@ struct iphdr  construct_traceroute_iphdr(const struct sockaddr_in dest_address, 
 uint16_t checksum(const uint16_t *buff, const size_t size);
 
 // Packet validation and error handling functions
+#define VALIDATE_ICMP_ERROR 0
+#define VALIDATE_ICMP_SUCCESS 1
+#define VALIDATE_ICMP_IGNORED 2
 int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_pid);
+
 int is_destination_reached(icmp_response_packet_t *response);
 int is_ttl_exceeded(icmp_response_packet_t *response);
+
 uint32_t get_response_source_ip(icmp_response_packet_t *response);
+
 int validate_packet_structure(void *packet, size_t packet_size, int packet_type);
 int handle_network_error(int error_code, char *error_buffer, size_t buffer_size);
 int validate_probe_packet(traceroute_packet_t *packet);

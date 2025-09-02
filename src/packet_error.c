@@ -1,12 +1,15 @@
 #include "packet.h"
 #include "traceroute.h"
 
+#include "print_utils.h"
+
 // Validate that an ICMP response corresponds to our traceroute probe
 int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_pid)
 {
     // Check if it's a relevant ICMP message type
-    if (response->icmp.type != ICMP_TIME_EXCEEDED && response->icmp.type != ICMP_DEST_UNREACH)
-        return (0);
+    if (response->icmp.type != ICMP_TIME_EXCEEDED && response->icmp.type != ICMP_DEST_UNREACH) {
+        return (VALIDATE_ICMP_ERROR);
+    }
 
     // For ICMP Time Exceeded and Destination Unreachable, the original packet
     // is included in the ICMP data. We need to extract and validate it.
@@ -19,14 +22,10 @@ int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_p
 
     // Basic validation of original IP header
     if (orig_ip->version != 4 || orig_ip->protocol != IPPROTO_UDP)
-        return (0);
+        return (VALIDATE_ICMP_ERROR);
 
     // Extract original UDP header (after IP header)
-    struct udphdr *orig_udp = (struct udphdr *)(icmp_data + (orig_ip->ihl * 4));
-
-//    // Validate that the destination port matches our expected port
-//    if (ntohs(orig_udp->dest) != expected_port)
-//        return (0);
+//    struct udphdr *orig_udp = (struct udphdr *)(icmp_data + (orig_ip->ihl * 4));
 
     // Extract UDP payload (first 8 bytes are included in ICMP response)
     uint8_t *udp_payload = icmp_data + (orig_ip->ihl * 4) + sizeof(struct udphdr);
@@ -34,24 +33,22 @@ int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_p
     // Extract PID from first 2 bytes of UDP payload
     uint16_t payload_pid = (udp_payload[0] << 8) | udp_payload[1];
 
-    // Debug: Print validation info (only if debug enabled)
-    if (getenv("TRACEROUTE_DEBUG")) {
-        printf("[DEBUG PID=%d] Expected PID: %d, Payload PID: %d, Dest port: %d\n",
-               getpid(), expected_pid, payload_pid, ntohs(orig_udp->dest));
-    }
-
     // If PID doesn't match, this packet is from another traceroute instance
     if (payload_pid != expected_pid) {
-        return (2);
+//        print_struct_iphdr(*(struct iphdr *)orig_ip);
+//        print_struct_udphdr(*orig_udp);
+//        printf("PID mismatch: expected %d, got %d\n", expected_pid, payload_pid);
+        return (VALIDATE_ICMP_IGNORED);
     }
 
-    return (1);
+    return (VALIDATE_ICMP_SUCCESS);
 }
 
 // Check if ICMP response indicates destination reached
 int is_destination_reached(icmp_response_packet_t *response)
 {
-    return (response->icmp.type == ICMP_DEST_UNREACH && 
+    // TODO: fix
+    return (response->icmp.type == ICMP_DEST_UNREACH &&
             response->icmp.code == ICMP_PORT_UNREACH);
 }
 
