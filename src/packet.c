@@ -50,6 +50,7 @@ struct iphdr construct_traceroute_iphdr(const struct sockaddr_in dest_address, u
 
 struct udphdr construct_traceroute_udphdr(uint16_t src_port, uint16_t dest_port, uint16_t length)
 {
+  (void)src_port;
     struct udphdr header = (struct udphdr){
         .source = htons(src_port),
         .dest = htons(dest_port),

@@ -55,7 +55,7 @@ uint16_t checksum(const uint16_t *buff, const size_t size);
 #define VALIDATE_ICMP_ERROR 0
 #define VALIDATE_ICMP_SUCCESS 1
 #define VALIDATE_ICMP_IGNORED 2
-int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_pid);
+int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_port);
 
 int is_destination_reached(icmp_response_packet_t *response);
 int is_ttl_exceeded(icmp_response_packet_t *response);

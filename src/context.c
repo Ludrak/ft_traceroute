@@ -55,7 +55,7 @@ int init_ctx(const string_hostname_t hostname, int options)
     // Use a more unique port calculation: PID + current time microseconds
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    uint16_t unique_port = 32768 + ((getpid() ^ tv.tv_usec) & 0x7FFF);
+    uint16_t unique_port = BASE_PORT + ((getpid() ^ tv.tv_usec) & 0x7FFF);
     src_addr.sin_port = htons(unique_port);
 
     if (bind(ctx.udp_socket, SOCKADDR(&src_addr), sizeof(src_addr)) != 0)
@@ -123,7 +123,7 @@ int init_ctx(const string_hostname_t hostname, int options)
     ctx.stats.total_hops = 0;
     ctx.stats.max_hops = MAX_HOPS;
     ctx.stats.current_hop = 1;
-    ctx.current_port = DEFAULT_PORT;
+    ctx.current_port = BASE_PORT + ((getpid() ^ tv.tv_usec) & 0x7FFF); // randomizes the starting port, avoids collisions with other traceroute instances
     ctx.current_ttl = 1;
 
     // Initialize hop results

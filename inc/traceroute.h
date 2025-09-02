@@ -25,9 +25,9 @@
 #include "options.h"
 
 #define MAX_HOPS 30
-#define DEFAULT_PORT 33434
+#define BASE_PORT 30000
 #define PROBES_PER_HOP 3
-#define TIMEOUT_SEC 1
+#define TIMEOUT_SEC 2
 #define TIMEOUT_USEC 0
 
 typedef struct s_hop_result
