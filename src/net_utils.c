@@ -116,13 +116,26 @@ int set_socket_ttl(socket_t socket, uint8_t ttl)
     return (0);
 }
 
+// checksum function already exists in checksum.c
+
 int create_udp_socket(int options)
 {
-    socket_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    // Create raw socket to control IP header (including IP ID)
+    socket_t sock = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
     if (sock <= 0)
     {
         if (options & OPT_VERBOSE)
-            print_failed("socket(UDP)", errno);
+            print_failed("socket(RAW)", errno);
+        return (-1);
+    }
+
+    // Enable IP_HDRINCL to include our own IP header
+    int hdrincl = 1;
+    if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &hdrincl, sizeof(hdrincl)) < 0)
+    {
+        if (options & OPT_VERBOSE)
+            print_failed("setsockopt(IP_HDRINCL)", errno);
+        close(sock);
         return (-1);
     }
 

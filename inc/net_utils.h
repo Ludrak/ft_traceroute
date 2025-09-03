@@ -38,5 +38,6 @@ string_hostname_t   resolve_hostname_from_ip(const uint32_t ip_addr, int options
 int set_socket_ttl(socket_t socket, uint8_t ttl);
 int create_udp_socket(int options);
 int create_icmp_socket(int options);
+uint16_t checksum(const uint16_t *buff, size_t len);
 
 #endif

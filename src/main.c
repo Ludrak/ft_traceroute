@@ -33,43 +33,58 @@ int send_probe_packet(uint8_t ttl, uint16_t dest_port)
 {
     debug_log("Sending probe: TTL=%d, dest_port=%d", ttl, dest_port);
 
-    // Set TTL on UDP socket
-    debug_log("Setting TTL to %d on UDP socket", ttl);
-    if (set_socket_ttl(ctx.udp_socket, ttl) != 0)
-    {
-        print_failed("set_socket_ttl()", errno);
-        return (-1);
-    }
-    debug_log("TTL set successfully");
+    // Create raw packet with IP + UDP headers
+    struct {
+        struct iphdr ip;
+        struct udphdr udp;
+        uint8_t data[32];
+    } __attribute__((packed)) packet;
 
-    // Send UDP packet (only UDP payload, kernel adds IP header)
-    struct sockaddr_in dest_addr = *ctx.dest_sockaddr;
-    dest_addr.sin_port = htons(dest_port);
-
-    // Create UDP payload with PID for parallel instance identification
-    uint8_t udp_payload[32];
     uint16_t pid = getpid() & 0xFFFF;
+    uint16_t udp_len = sizeof(struct udphdr) + 32;
+    uint16_t total_len = sizeof(struct iphdr) + udp_len;
 
-    // Put PID in first 2 bytes of payload
-    udp_payload[0] = (pid >> 8) & 0xFF;
-    udp_payload[1] = pid & 0xFF;
+    // Construct IP header with our PID as ID
+    memset(&packet, 0, sizeof(packet));
+    packet.ip.version = 4;
+    packet.ip.ihl = 5;
+    packet.ip.tos = 0;
+    packet.ip.tot_len = htons(total_len);
+    packet.ip.id = htons(pid);  // Use PID as IP ID for identification
+    packet.ip.frag_off = 0;
+    packet.ip.ttl = ttl;
+    packet.ip.protocol = IPPROTO_UDP;
+    packet.ip.check = 0;
+    packet.ip.saddr = INADDR_ANY;
+    packet.ip.daddr = ctx.dest_sockaddr->sin_addr.s_addr;
+//    printf("packet.ip.id = %d (0x%04x)\n", ntohs(packet.ip.id), ntohs(packet.ip.id));
 
-    // Fill rest with standard traceroute pattern
-    for (int i = 2; i < 32; i++)
-        udp_payload[i] = 0x40 + (i % 64); // ASCII printable characters
+    // Construct UDP header
+    packet.udp.source = htons(BASE_PORT + getpid());
+    packet.udp.dest = htons(dest_port);
+    packet.udp.len = htons(udp_len);
+    packet.udp.check = 0; // UDP checksum optional for IPv4
 
-    debug_log("About to sendto() with %zu bytes", sizeof(udp_payload));
-    ssize_t bytes_sent = sendto(ctx.udp_socket, udp_payload,
-                               sizeof(udp_payload), 0,
-                               SOCKADDR(&dest_addr), sizeof(dest_addr));
+    // Fill data with standard pattern
+    for (int i = 0; i < 32; i++)
+        packet.data[i] = 0x40 + (i % 64);
 
-    if (bytes_sent < 0)
-    {
-        print_failed("sendto()", errno);
+    // Calculate IP checksum (copy to avoid packed struct alignment issues)
+    struct iphdr ip_copy = packet.ip;
+    packet.ip.check = checksum((uint16_t*)&ip_copy, sizeof(ip_copy));
+
+    // Send via raw socket
+    debug_log("Sending raw packet with IP ID %d (0x%04x), TTL %d, dest port %d", pid, pid, ttl, dest_port);
+    debug_log("Packet IP header: version=%d, ihl=%d, id=%d (0x%04x)", packet.ip.version, packet.ip.ihl, ntohs(packet.ip.id), ntohs(packet.ip.id));
+    ssize_t bytes_sent = sendto(ctx.udp_socket, &packet, total_len, 0,
+                               SOCKADDR(ctx.dest_sockaddr), sizeof(*ctx.dest_sockaddr));
+
+    if (bytes_sent < 0) {
+        print_failed("sendto() raw", errno);
         return (-1);
     }
 
-    debug_log("Packet sent successfully: %zd bytes", bytes_sent);
+    debug_log("Sent %zd bytes via raw socket", bytes_sent);
     return (0);
 }
 
@@ -128,7 +143,7 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
 
     // Validate ICMP response
     debug_log("Validating ICMP packet: type=%d code=%d for port %d", response.icmp.type, response.icmp.code, probe_port);
-    int packet_status = validate_icmp_response(&response, getpid() & 0xFFFF);
+    int packet_status = validate_icmp_response(&response, getpid(), expected_hop);
     debug_log("Validation result: %d", packet_status);
     if (packet_status == VALIDATE_ICMP_ERROR) {
       debug_log("ICMP validation error - rejecting packet");
@@ -193,7 +208,9 @@ int traceroute_single_probe(uint8_t hop_number, uint8_t probe_number, uint16_t p
 
     // Wait for response
     debug_log("Waiting for response to probe %d...", probe_number + 1);
-    int response_result = receive_icmp_response(hop_number, &send_time, probe_port);
+    int response_result = RECV_ICMP_IGNORED;
+    while (response_result == RECV_ICMP_IGNORED)
+      response_result = receive_icmp_response(hop_number + probe_number, &send_time, probe_port);
     debug_log("Response result: %d", response_result);
 
     if (response_result == RECV_ICMP_TIMEOUT)
@@ -364,7 +381,7 @@ int traceroute(string_hostname_t host, int options)
 
         int destination_reached = traceroute_hop(hop);
 
-        ctx.current_port += PROBES_PER_HOP;//DEFAULT_PORT + (hop - 1) * PROBES_PER_HOP;
+        ctx.current_port += PROBES_PER_HOP;
         
         if (destination_reached)
         {

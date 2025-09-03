@@ -4,7 +4,7 @@
 #include "print_utils.h"
 
 // Validate that an ICMP response corresponds to our traceroute probe
-int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_pid)
+int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_pid, uint16_t hop_count)
 {
     if (getenv("TRACEROUTE_DEBUG")) {
         printf("[DEBUG] Validating ICMP: type=%d code=%d\n", response->icmp.type, response->icmp.code);
@@ -34,21 +34,12 @@ int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_p
     // Extract original UDP header (after IP header)
     struct udphdr *orig_udp = (struct udphdr *)(icmp_data + (orig_ip->ihl * 4));
 
-    // Extract UDP payload (first 8 bytes are included in ICMP response)
-    uint8_t *udp_payload = icmp_data + (orig_ip->ihl * 4) + sizeof(struct udphdr);
+    (void)hop_count;
+    int resolved_pid = ntohs(orig_udp->source) - BASE_PORT;
 
-    // Extract PID from first 2 bytes of UDP payload
-    uint16_t payload_pid = (udp_payload[0] << 8) | udp_payload[1];
-
-    // Debug: Print validation info (only if debug enabled)
-    if (getenv("TRACEROUTE_DEBUG")) {
-        printf("[DEBUG PID=%d] Expected PID: %d, Payload PID: %d, Dest port: %d\n",
-               getpid(), expected_pid, payload_pid, ntohs(orig_udp->dest));
+    if (resolved_pid != expected_pid) {
+      return (VALIDATE_ICMP_IGNORED);
     }
-
-    // If PID doesn't match, this packet is from another traceroute instance
-    if (payload_pid != expected_pid)
-        return (VALIDATE_ICMP_IGNORED);
 
     return (VALIDATE_ICMP_SUCCESS);
 }

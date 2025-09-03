@@ -46,8 +46,7 @@ int init_ctx(const string_hostname_t hostname, int options)
         return (errno);
     }
 
-    // Let kernel choose ephemeral source port (like real traceroute)
-    // No explicit binding needed - kernel will assign automatically
+    // Raw sockets don't need source port binding - we construct the entire packet
 
     // creating ICMP socket for receiving responses
     ctx.icmp_socket = create_icmp_socket(options);
@@ -96,7 +95,7 @@ int init_ctx(const string_hostname_t hostname, int options)
     // Use standard traceroute port range with PID offset for parallel instances
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    ctx.current_port = BASE_PORT;
+    ctx.current_port = BASE_PORT;// - (getpid() & 0xFF);
     ctx.current_ttl = 1;
 
     // Initialize hop results
