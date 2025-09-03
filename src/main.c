@@ -46,11 +46,16 @@ int send_probe_packet(uint8_t ttl, uint16_t dest_port)
     struct sockaddr_in dest_addr = *ctx.dest_sockaddr;
     dest_addr.sin_port = htons(dest_port);
 
-    // Create simple UDP payload (standard traceroute format)
+    // Create UDP payload with PID for parallel instance identification
     uint8_t udp_payload[32];
+    uint16_t pid = getpid() & 0xFFFF;
 
-    // Standard traceroute uses simple incrementing pattern
-    for (int i = 0; i < 32; i++)
+    // Put PID in first 2 bytes of payload
+    udp_payload[0] = (pid >> 8) & 0xFF;
+    udp_payload[1] = pid & 0xFF;
+
+    // Fill rest with standard traceroute pattern
+    for (int i = 2; i < 32; i++)
         udp_payload[i] = 0x40 + (i % 64); // ASCII printable characters
 
     debug_log("About to sendto() with %zu bytes", sizeof(udp_payload));
@@ -123,7 +128,7 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
 
     // Validate ICMP response
     debug_log("Validating ICMP packet: type=%d code=%d for port %d", response.icmp.type, response.icmp.code, probe_port);
-    int packet_status = validate_icmp_response(&response, probe_port);
+    int packet_status = validate_icmp_response(&response, getpid() & 0xFFFF);
     debug_log("Validation result: %d", packet_status);
     if (packet_status == VALIDATE_ICMP_ERROR) {
       debug_log("ICMP validation error - rejecting packet");
@@ -282,7 +287,9 @@ int traceroute_hop(uint8_t hop_number)
 
     printf("%2d  ", hop_number);
 
-    uint8_t resolved = 0;
+    // Track which probe IPs have been resolved to avoid duplicate hostnames
+    string_hostname_t resolved_ips[PROBES_PER_HOP] = {NULL};
+    int resolved_count = 0;
 
     // Send probes one by one using state machine approach
     for (int probe = 0; probe < PROBES_PER_HOP; probe++)
@@ -302,17 +309,40 @@ int traceroute_hop(uint8_t hop_number)
 
         hop_result_t *hop = &ctx.stats.hops[hop_number - 1];
 
-
+        // Check if this IP has already been resolved
         uint8_t print_host = 0;
-        if (!resolved)
-        {
+        string_hostname_t current_ip = hop->ip_addr;
+        uint8_t already_seen = 0;
+
+        if (current_ip) {
+            for (int i = 0; i < resolved_count; i++) {
+                if (resolved_ips[i] && strcmp(resolved_ips[i], current_ip) == 0) {
+                    already_seen = 1;
+                    break;
+                }
+            }
+        }
+
+        if (!already_seen) {
             print_host = resolve_hop_host(hop);
-            if (print_host)
-                resolved = 1;
+            resolve_hop_host(hop);
+            if (print_host && resolved_count < PROBES_PER_HOP && current_ip) {
+                resolved_ips[resolved_count] = strdup(current_ip);
+                resolved_count++;
+            }
         }
 
         print_hop_info(hop, probe, print_host);
+        fflush(stdout);
     }
+
+    // Cleanup allocated IP strings
+    for (int i = 0; i < resolved_count; i++) {
+        if (resolved_ips[i]) {
+            free(resolved_ips[i]);
+        }
+    }
+
     printf("\n");
     return destination_reached;
 }

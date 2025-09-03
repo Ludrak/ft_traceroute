@@ -36,7 +36,7 @@ typedef struct  icmp_response_packet
 #define VALIDATE_ICMP_ERROR 0
 #define VALIDATE_ICMP_SUCCESS 1
 #define VALIDATE_ICMP_IGNORED 2
-int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_port);
+int validate_icmp_response(icmp_response_packet_t *response, uint16_t expected_pid);
 
 int is_destination_reached(icmp_response_packet_t *response);
 int is_ttl_exceeded(icmp_response_packet_t *response);
