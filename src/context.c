@@ -46,39 +46,8 @@ int init_ctx(const string_hostname_t hostname, int options)
         return (errno);
     }
 
-    // Bind to a specific source port for identification
-    struct sockaddr_in src_addr;
-    bzero(&src_addr, sizeof(src_addr));
-    src_addr.sin_family = AF_INET;
-    src_addr.sin_addr.s_addr = INADDR_ANY;
-
-    // Use a more unique port calculation: PID + current time microseconds
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    uint16_t unique_port = BASE_PORT + ((getpid() ^ tv.tv_usec) & 0x7FFF);
-    src_addr.sin_port = htons(unique_port);
-
-    if (bind(ctx.udp_socket, SOCKADDR(&src_addr), sizeof(src_addr)) != 0)
-    {
-        if (options & OPT_VERBOSE)
-            print_failed("bind(UDP)", errno);
-        // Try with a random port if bind fails
-        src_addr.sin_port = 0; // Let kernel choose
-        if (bind(ctx.udp_socket, SOCKADDR(&src_addr), sizeof(src_addr)) != 0)
-        {
-            if (options & OPT_VERBOSE)
-                print_failed("bind(UDP) with auto port", errno);
-        }
-    }
-
-    // Store the actual bound port for validation
-    socklen_t addr_len = sizeof(src_addr);
-    if (getsockname(ctx.udp_socket, SOCKADDR(&src_addr), &addr_len) == 0)
-    {
-        ctx.source_port = ntohs(src_addr.sin_port);
-        if (options & OPT_VERBOSE)
-            printf("Bound to source port: %d\n", ctx.source_port);
-    }
+    // Let kernel choose ephemeral source port (like real traceroute)
+    // No explicit binding needed - kernel will assign automatically
 
     // creating ICMP socket for receiving responses
     ctx.icmp_socket = create_icmp_socket(options);
@@ -123,7 +92,11 @@ int init_ctx(const string_hostname_t hostname, int options)
     ctx.stats.total_hops = 0;
     ctx.stats.max_hops = MAX_HOPS;
     ctx.stats.current_hop = 1;
-    ctx.current_port = BASE_PORT + ((getpid() ^ tv.tv_usec) & 0x7FFF); // randomizes the starting port, avoids collisions with other traceroute instances
+
+    // Use standard traceroute port range with PID offset for parallel instances
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    ctx.current_port = BASE_PORT + ((getpid() ^ tv.tv_usec) & 0x3FF); // randomizes the starting port, avoids collisions with other traceroute instances
     ctx.current_ttl = 1;
 
     // Initialize hop results

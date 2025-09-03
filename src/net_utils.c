@@ -103,6 +103,16 @@ int set_socket_ttl(socket_t socket, uint8_t ttl)
     {
         return (errno);
     }
+
+    // Verify TTL was set correctly
+    if (getenv("TRACEROUTE_DEBUG")) {
+        int actual_ttl;
+        socklen_t len = sizeof(actual_ttl);
+        if (getsockopt(socket, IPPROTO_IP, IP_TTL, &actual_ttl, &len) == 0) {
+            printf("[DEBUG] TTL verification: requested=%d, actual=%d\n", ttl, actual_ttl);
+        }
+    }
+
     return (0);
 }
 

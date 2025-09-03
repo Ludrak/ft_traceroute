@@ -27,22 +27,7 @@ void on_interrupt(int sig)
     exit(sig);
 }
 
-size_t construct_probe_packet(traceroute_packet_t *packet, uint8_t ttl, uint16_t dest_port)
-{
-    uint16_t udp_length = sizeof(struct udphdr) + sizeof(struct timeval) + 32;
-    uint16_t total_length = sizeof(struct iphdr) + udp_length;
-    
-    struct iphdr ip_header = construct_traceroute_iphdr(*ctx.dest_sockaddr, ttl, total_length);
-    struct udphdr udp_header = construct_traceroute_udphdr(0, dest_port, udp_length);
-    
-    size_t packet_size = construct_traceroute_packet(packet, ip_header, udp_header);
-    write_packet_time(packet);
-    
-    // Fill data section with pattern
-    memset(&packet->data, 0x40 + ttl, sizeof(packet->data));
-    
-    return packet_size;
-}
+// REMOVED: construct_probe_packet() - unused dead code
 
 int send_probe_packet(uint8_t ttl, uint16_t dest_port)
 {
@@ -50,22 +35,24 @@ int send_probe_packet(uint8_t ttl, uint16_t dest_port)
     printf("[%d] ", dest_port);
 
     // Set TTL on UDP socket
+    debug_log("Setting TTL to %d on UDP socket", ttl);
     if (set_socket_ttl(ctx.udp_socket, ttl) != 0)
     {
         print_failed("set_socket_ttl()", errno);
         return (-1);
     }
+    debug_log("TTL set successfully");
 
     // Send UDP packet (only UDP payload, kernel adds IP header)
     struct sockaddr_in dest_addr = *ctx.dest_sockaddr;
     dest_addr.sin_port = htons(dest_port);
 
-    // Create UDP payload
+    // Create simple UDP payload (standard traceroute format)
     uint8_t udp_payload[32];
 
-    // Fill with pattern
+    // Standard traceroute uses simple incrementing pattern
     for (int i = 0; i < 32; i++)
-        udp_payload[i] = '*';
+        udp_payload[i] = 0x40 + (i % 64); // ASCII printable characters
 
     debug_log("About to sendto() with %zu bytes", sizeof(udp_payload));
     ssize_t bytes_sent = sendto(ctx.udp_socket, udp_payload,
@@ -101,7 +88,9 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     FD_ZERO(&read_fds);
     FD_SET(ctx.icmp_socket, &read_fds);
 
+    debug_log("Calling select() for hop %d port %d", expected_hop, probe_port);
     int select_result = select(ctx.icmp_socket + 1, &read_fds, NULL, NULL, &timeout);
+    debug_log("select() returned: %d", select_result);
 
     if (select_result < 0)
     {
@@ -110,6 +99,7 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     }
     
     if (select_result == 0) {
+        debug_log("TIMEOUT: No ICMP packets received for hop %d port %d", expected_hop, probe_port);
         printf("T");
         return (RECV_ICMP_TIMEOUT);
     }
@@ -118,6 +108,7 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
 
+    debug_log("About to receive ICMP packet...");
     ssize_t bytes_received = recvfrom(ctx.icmp_socket, &response, sizeof(response), 0,
                                      SOCKADDR(&from_addr), &from_len);
 
@@ -131,14 +122,19 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     // Get receive time
     struct timeval recv_time;
     gettimeofday(&recv_time, NULL);
+    debug_log("Received %zd bytes from %s, ICMP type=%d code=%d", bytes_received, inet_ntoa(from_addr.sin_addr), response.icmp.type, response.icmp.code);
 
     // Validate ICMP response
+    debug_log("Validating ICMP packet: type=%d code=%d for port %d", response.icmp.type, response.icmp.code, probe_port);
     int packet_status = validate_icmp_response(&response, probe_port);
+    debug_log("Validation result: %d", packet_status);
     if (packet_status == VALIDATE_ICMP_ERROR) {
+      debug_log("ICMP validation error - rejecting packet");
       printf("V");
         return (RECV_ICMP_ERROR); // TODO: fix RECV_ICMP_TIMEOUT
     }
     else if (packet_status == VALIDATE_ICMP_IGNORED) {
+      debug_log("ICMP packet ignored - not our packet");
       printf("I");
         return (RECV_ICMP_IGNORED);
     }
@@ -200,9 +196,7 @@ int traceroute_single_probe(uint8_t hop_number, uint8_t probe_number, uint16_t p
 
     // Wait for response
     debug_log("Waiting for response to probe %d...", probe_number + 1);
-    int response_result = RECV_ICMP_IGNORED;
-    while (response_result == RECV_ICMP_IGNORED) // debounce ignored packets
-      response_result = receive_icmp_response(hop_number, &send_time, probe_port);
+    int response_result = receive_icmp_response(hop_number, &send_time, probe_port);
     debug_log("Response result: %d", response_result);
 
     if (response_result == RECV_ICMP_TIMEOUT)
@@ -266,11 +260,34 @@ int resolve_hop_host(hop_result_t *hop)
     return 0;
 }
 
+// Flush ICMP socket buffer
+void flush_icmp_socket() {
+    fd_set read_fds;
+    struct timeval timeout = {0, 0}; // Non-blocking
+    icmp_response_packet_t dummy;
+
+    while (1) {
+        FD_ZERO(&read_fds);
+        FD_SET(ctx.icmp_socket, &read_fds);
+
+        int result = select(ctx.icmp_socket + 1, &read_fds, NULL, NULL, &timeout);
+        if (result <= 0) break; // No more packets
+
+        // Read and discard packet
+        recvfrom(ctx.icmp_socket, &dummy, sizeof(dummy), 0, NULL, NULL);
+        debug_log("Flushed old ICMP packet from buffer");
+    }
+}
+
 int traceroute_hop(uint8_t hop_number)
 {
     int destination_reached = 0;
 
     debug_log("=== Starting hop %d ===", hop_number);
+
+    // Flush old ICMP packets from buffer
+    flush_icmp_socket();
+
     printf("%2d  ", hop_number);
 
     uint8_t resolved = 0;
