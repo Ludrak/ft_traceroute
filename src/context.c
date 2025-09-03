@@ -96,7 +96,7 @@ int init_ctx(const string_hostname_t hostname, int options)
     // Use standard traceroute port range with PID offset for parallel instances
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    ctx.current_port = BASE_PORT + ((getpid() ^ tv.tv_usec) & 0x3FF); // randomizes the starting port, avoids collisions with other traceroute instances
+    ctx.current_port = BASE_PORT;// + ((getpid() ^ tv.tv_usec) & 0x3FF); // randomizes the starting port, avoids collisions with other traceroute instances
     ctx.current_ttl = 1;
 
     // Initialize hop results

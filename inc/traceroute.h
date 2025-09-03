@@ -27,8 +27,8 @@
 #define MAX_HOPS 30
 #define BASE_PORT 33434
 #define PROBES_PER_HOP 3
-#define TIMEOUT_SEC 1
-#define TIMEOUT_USEC 0
+#define TIMEOUT_SEC 0
+#define TIMEOUT_USEC 60000 // 60ms
 
 typedef struct s_hop_result
 {

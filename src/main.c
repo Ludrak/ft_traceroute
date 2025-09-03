@@ -32,7 +32,6 @@ void on_interrupt(int sig)
 int send_probe_packet(uint8_t ttl, uint16_t dest_port)
 {
     debug_log("Sending probe: TTL=%d, dest_port=%d", ttl, dest_port);
-    printf("[%d] ", dest_port);
 
     // Set TTL on UDP socket
     debug_log("Setting TTL to %d on UDP socket", ttl);
@@ -100,7 +99,6 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     
     if (select_result == 0) {
         debug_log("TIMEOUT: No ICMP packets received for hop %d port %d", expected_hop, probe_port);
-        printf("T");
         return (RECV_ICMP_TIMEOUT);
     }
     
@@ -115,7 +113,6 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     if (bytes_received < 0)
     {
         print_failed("recvfrom()", errno);
-        printf("E");
         return (RECV_ICMP_ERROR);
     }
 
@@ -130,12 +127,10 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     debug_log("Validation result: %d", packet_status);
     if (packet_status == VALIDATE_ICMP_ERROR) {
       debug_log("ICMP validation error - rejecting packet");
-      printf("V");
         return (RECV_ICMP_ERROR); // TODO: fix RECV_ICMP_TIMEOUT
     }
     else if (packet_status == VALIDATE_ICMP_IGNORED) {
       debug_log("ICMP packet ignored - not our packet");
-      printf("I");
         return (RECV_ICMP_IGNORED);
     }
 
@@ -153,7 +148,6 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
     {
         ctx.stats.hops[expected_hop - 1].is_destination = 1;
         free(source_ip);
-        printf("reached");
         return (RECV_ICMP_DEST_REACHED); // Destination reached
     }
 
@@ -163,8 +157,6 @@ int receive_icmp_response(uint8_t expected_hop, struct timeval *send_time, int p
         free(source_ip);
         return (RECV_ICMP_TTL_EXCEEDED); // TTL exceeded (normal response)
     }
-
-    printf("ignored after: %d", packet_status);
 
     free(source_ip);
     return (RECV_ICMP_IGNORED); // Other ICMP message
