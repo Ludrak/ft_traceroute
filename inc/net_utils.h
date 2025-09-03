@@ -34,7 +34,6 @@ string_hostname_t   resolve_hostname(const struct sockaddr_in address, int optio
 string_hostname_t   resolve_address_from_int(const sa_family_t address_family, const uint32_t address, int options);
 string_hostname_t   resolve_hostname_from_ip(const uint32_t ip_addr, int options);
 
-// Additional functions for traceroute
 int set_socket_ttl(socket_t socket, uint8_t ttl);
 int create_udp_socket(int options);
 int create_icmp_socket(int options);

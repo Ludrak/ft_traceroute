@@ -5,7 +5,7 @@ extern traceroute_ctx_t ctx;
 
 static int set_socket_options(int socket, int options)
 {
-    // setting recv buffer size 
+    // setting recv buffer size
     int recv_buffer_size = 0x400;
     if (setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &recv_buffer_size, sizeof(recv_buffer_size)) != 0)
     {
@@ -46,8 +46,6 @@ int init_ctx(const string_hostname_t hostname, int options)
         return (errno);
     }
 
-    // Raw sockets don't need source port binding - we construct the entire packet
-
     // creating ICMP socket for receiving responses
     ctx.icmp_socket = create_icmp_socket(options);
     if (ctx.icmp_socket <= 0)
@@ -86,16 +84,15 @@ int init_ctx(const string_hostname_t hostname, int options)
         return (1);
     }
 
-    // Initialize traceroute statistics
+    // Initialize traceroute stats
     ctx.stats.dest_hostname = strdup(hostname);
     ctx.stats.total_hops = 0;
     ctx.stats.max_hops = MAX_HOPS;
     ctx.stats.current_hop = 1;
 
-    // Use standard traceroute port range with PID offset for parallel instances
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    ctx.current_port = BASE_PORT;// - (getpid() & 0xFF);
+    ctx.current_port = BASE_PORT;
     ctx.current_ttl = 1;
 
     // Initialize hop results
@@ -123,16 +120,14 @@ int ctx_add_hop_result(const uint8_t hop, const string_hostname_t ip, const time
 
     hop_result_t *hop_result = &ctx.stats.hops[hop - 1];
     
-    // Set IP address if not already set
     if (ip != NULL)
     {
         hop_result->ip_addr = strdup(ip);
     }
     
-    // Add RTT measurement
     if (probe_num < PROBES_PER_HOP)
     {
-        hop_result->rtt[probe_num] = rtt;
+      	hop_result->rtt[probe_num] = rtt;
         if (rtt >= 0)
             hop_result->received_probes++;
         else
@@ -156,7 +151,6 @@ void destroy_ctx()
     if (ctx.stats.dest_hostname)
         free(ctx.stats.dest_hostname);
 
-    // Free hop result data
     for (int i = 0; i < MAX_HOPS; i++)
     {
         if (ctx.stats.hops[i].ip_addr)

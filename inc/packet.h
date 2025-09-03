@@ -16,10 +16,6 @@
 
 typedef uint8_t  packet_t[MAX_PACKET_SIZE];
 
-// REMOVED: traceroute_packet_t - unused structure
-// The actual implementation uses simple UDP payload via sockets
-
-// ICMP packet structure for receiving responses
 typedef struct  icmp_response_packet
 {
     // Headers
@@ -28,9 +24,6 @@ typedef struct  icmp_response_packet
     // Original packet data (for validation)
     uint8_t        original_data[64];
 } __attribute__((packed, aligned(4))) icmp_response_packet_t;
-
-// REMOVED: All unused function declarations
-// The actual implementation uses simple UDP sockets
 
 // Packet validation and error handling functions
 #define VALIDATE_ICMP_ERROR 0

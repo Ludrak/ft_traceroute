@@ -139,7 +139,7 @@ int create_udp_socket(int options)
         return (-1);
     }
 
-    // Enable broadcast (optional for traceroute)
+    // Enable broadcast
     int broadcast = 1;
     if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) != 0)
     {
@@ -161,8 +161,6 @@ int create_icmp_socket(int options)
             print_failed("socket(ICMP)", errno);
         return (-1);
     }
-
-    // Note: ICMP filter removed for debugging - all ICMP messages will be received
 
     return (sock);
 }

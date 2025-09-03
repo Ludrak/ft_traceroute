@@ -59,9 +59,9 @@ typedef struct  s_traceroute_ctx
     socket_t    icmp_socket;
     struct sockaddr_in *dest_sockaddr;
 
-    uint16_t    current_port;      // Current destination port
+    uint16_t    current_port;
     uint16_t    current_ttl;
-    uint16_t    source_port;       // Our bound source port for validation
+    uint16_t    source_port;
 
     traceroute_stats_t  stats;
 }               traceroute_ctx_t;
